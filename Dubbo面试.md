@@ -269,3 +269,127 @@ Dubbox 是继 Dubbo 停止维护后，当当网基于 Dubbo 做的一个扩展�
 | 批量任务 | 无 | Spring Cloud Task |
 
 使用Dubbo构建的微服务架构就像组装电脑，各环节我们的选择自由度很高，但是最终结果很有可能因为一条内存质量不行就点不亮了，总是让人不怎么放心，但是如果你是一名高手，那这些都不是问题；而Spring Cloud就像品牌机，在Spring Source的整合下，做了大量的兼容性测试，保证了机器拥有更高的稳定性，但是如果要在使用非原装组件外的东西，就需要对其基础有足够的了解。
+
+
+
+## 30、看过源码，那说下服务暴露的流程？
+
+服务的暴露起始于 Spring IOC 容器刷新完毕之后，会根据配置参数组装成 URL， 然后根据 URL 的参数来进行本地或者远程调用。
+
+会通过 proxyFactory.getInvoker，利用 javassist 来进行动态代理，封装真的实现类，然后再通过 URL 参数选择对应的协议来进行 protocol.export，默认是 Dubbo 协议。
+
+在第一次暴露的时候会调用 createServer 来创建 Server，默认是 NettyServer。
+
+然后将 export 得到的 exporter 存入一个 Map 中，供之后的远程调用查找，然后会向注册中心注册提供者的信息。
+
+基本上就是这么个流程，说了这些差不多了，太细的谁都记住不。
+
+![img](https://img-blog.csdnimg.cn/img_convert/8bb22932743801c3f4ec3b995d87bcca.png)
+
+## 31、看过源码，那说下服务引入的流程？
+
+服务的引入时机有两种，第一种是饿汉式，第二种是懒汉式。
+
+饿汉式就是加载完毕就会引入，懒汉式是只有当这个服务被注入到其他类中时启动引入流程，默认是懒汉式。
+
+会先根据配置参数组装成 URL ，一般而言我们都会配置的注册中心，所以会构建 RegistryDirectory 向注册中心注册消费者的信息，并且订阅提供者、配置、路由等节点。
+
+得知提供者的信息之后会进入 Dubbo 协议的引入，会创建 Invoker ，期间会包含 NettyClient，来进行远程通信，最后通过 Cluster 来包装 Invoker，默认是 FailoverCluster，最终返回代理类。
+
+说这么多差不多了，关键的点都提到了。
+
+切忌不要太过细，不要把你知道的都说了，这样会抓不住重点，比如上面的流程你要插入，引入的三种方式：本地引入、直连远程引入、通过注册中心引入。
+
+然后再分别说本地引入怎样的，芭芭拉的就会很乱，所以面试的时候是需要删减的，要直击重点。
+
+其实真实说的应该比我上面说的还要精简点才行，我是怕大家不太清楚说的稍微详细了一些。
+
+
+看过源码，那说下服务调用的流程？
+
+调用某个接口的方法会调用之前生成的代理类，然后会从 cluster 中经过路由的过滤、负载均衡机制选择一个 invoker 发起远程调用，此时会记录此请求和请求的 ID 等待服务端的响应。
+
+服务端接受请求之后会通过参数找到之前暴露存储的 map，得到相应的 exporter ，然后最终调用真正的实现类，再组装好结果返回，这个响应会带上之前请求的 ID。
+
+消费者收到这个响应之后会通过 ID 去找之前记录的请求，然后找到请求之后将响应塞到对应的 Future 中，唤醒等待的线程，最后消费者得到响应，一个流程完毕。
+
+关键的就是 cluster、路由、负载均衡，然后 Dubbo 默认是异步的，所以请求和响应是如何对应上的。
+
+之后可能还会追问 Dubbo 异步转同步如何实现的之类的，在丙之前文章里面都说了，忘记的同学可以回去看看。
+
+整理了一份Java核心知识点。覆盖了JVM、锁、并发、Java反射、Spring原理、微服务、Zookeeper、数据库、数据结构等大量知识点。基本上涵盖了Java架构所有的技术知识点的资料，还覆盖了大厂面试题，同时也有一些springboot等项目源码分享给大家
+
+ 
+
+ 
+
+## 33、知道什么是 SPI 嘛？
+
+这又是一个方向了，从上面的回答中，不论是从 Dubbo 协议，还是 cluster ，什么 export 方法等等无处不是 SPI 的影子，所以如果是问 Dubbo 方面的问题，问 SPI 是毋庸置疑的，因为源码里 SPI 无处不在，而且 SPI 也是 Dubbo 可扩展性的基石。
+
+所以这个题目没什么套路，直接答就行。
+
+SPI 是 Service Provider Interface，主要用于框架中，框架定义好接口，不同的使用者有不同的需求，因此需要有不同的实现，而 SPI 就通过定义一个特定的位置，Java SPI 约定在 Classpath 下的 META-INF/services/ 目录里创建一个以服务接口命名的文件，然后文件里面记录的是此 jar 包提供的具体实现类的全限定名。
+
+所以就可以通过接口找到对应的文件，获取具体的实现类然后加载即可，做到了灵活的替换具体的实现类。
+
+## 34、为什么 Dubbo 不用 JDK 的 SPI，而是要自己实现?
+
+问这个问题就是看你有没有深入的了解，或者自己思考过，不是死板的看源码，或者看一些知识点。
+
+很多点是要思考的，不是书上说什么就是什么，你要知道这样做的理由，有什么好处和坏处，这很容易看出一个人是死记硬背还是有自己的思考。
+
+答：因为 Java SPI 在查找扩展实现类的时候遍历 SPI 的配置文件并且将实现类全部实例化，假设一个实现类初始化过程比较消耗资源且耗时，但是你的代码里面又用不上它，这就产生了资源的浪费。
+
+因此 Dubbo 就自己实现了一个 SPI，给每个实现类配了个名字，通过名字去文件里面找到对应的实现类全限定名然后加载实例化，按需加载。
+
+这答出来就加分了，面试官心里在拍手了，不错不错有点东西。
+
+## 35、Dubbo 为什么默认用 Javassist
+
+上面你回答 Dubbo 用 Javassist 动态代理，所以很可能会问你为什么要用这个代理，可能还会引申出 JDK 的动态代理、ASM、CGLIB。
+
+所以这也是个注意点，如果你不太清楚的话上面的回答就不要扯到动态代理了，如果清楚的话那肯定得提，来诱导面试官来问你动态代理方面的问题，这很关键。
+
+面试官是需要诱导的，毕竟他也想知道你优秀的方面到底有多优秀，你也取长补短，双赢双赢。
+
+来回答下为什么用 Javassist，很简单，就是快，且字节码生成方便。
+
+ASM 比 Javassist 更快，但是没有快一个数量级，而Javassist 只需用字符串拼接就可以生成字节码，而 ASM 需要手工生成，成本较高，比较麻烦。
+
+## 36、如果让你设计一个 RPC 框架，如何设计？
+
+面试官都很喜欢问这类问题，来考验候选人的设计能力，和平日有无全方面的了解过一个框架。
+
+如果你平时没有思考，没有往这方面想过答出来的东西就会没有条理性，会显得杂乱无章，不过你也不用慌张，不用想的很全面，答的很细致，没有必要，面试官要的是那些关键的重点。
+
+你可以从底层向上开始说起。
+
+首先需要实现高性能的网络传输，可以采用 Netty 来实现，不用自己重复造轮子，然后需要自定义协议，毕竟远程交互都需要遵循一定的协议，然后还需要定义好序列化协议，网络的传输毕竟都是二进制流传输的。
+
+然后可以搞一套描述服务的语言，即 IDL（Interface description language），让所有的服务都用 IDL 定义，再由框架转换为特定编程语言的接口，这样就能跨语言了。
+
+此时最近基本的功能已经有了，但是只是最基础的，工业级的话首先得易用，所以框架需要把上述的细节对使用者进行屏蔽，让他们感觉不到本地调用和远程调用的区别，所以需要代理实现。
+
+然后还需要实现集群功能，因此的要服务发现、注册等功能，所以需要注册中心，当然细节还是需要屏蔽的。
+
+最后还需要一个完善的监控机制，埋点上报调用情况等等，便于运维。
+
+这样一个 RPC 框架的雏形就差不多了。
+
+## 37.分布式服务框架Dubbo
+
+
+
+- [面试连环炮](https://gitee.com/fenglunjia/Java-Interview-Advanced/blob/master/docs/distributed-system/distributed-system-interview.md)
+- [如何设计一个高并发系统？](https://gitee.com/fenglunjia/Java-Interview-Advanced/blob/master/docs/high-concurrency/high-concurrency-design.md)
+- [说一下 Dubbo 的工作原理？注册中心挂了可以继续通信吗？](https://gitee.com/fenglunjia/Java-Interview-Advanced/blob/master/docs/distributed-system/dubbo-operating-principle.md)
+- [Dubbo 支持哪些序列化协议？说一下 Hessian 的数据结构？PB 知道吗？为什么 PB 的效率是最高的？](https://gitee.com/fenglunjia/Java-Interview-Advanced/blob/master/docs/distributed-system/dubbo-serialization-protocol.md)
+- [Dubbo 负载均衡策略和集群容错策略都有哪些？动态代理策略呢？](https://gitee.com/fenglunjia/Java-Interview-Advanced/blob/master/docs/distributed-system/dubbo-load-balancing.md)
+- [Dubbo 的 spi 思想是什么？](https://gitee.com/fenglunjia/Java-Interview-Advanced/blob/master/docs/distributed-system/dubbo-spi.md)
+- [如何基于 Dubbo 进行服务治理、服务降级、失败重试以及超时重试？](https://gitee.com/fenglunjia/Java-Interview-Advanced/blob/master/docs/distributed-system/dubbo-service-management.md)
+- [分布式服务接口的幂等性如何设计（比如不能重复扣款）？](https://gitee.com/fenglunjia/Java-Interview-Advanced/blob/master/docs/distributed-system/distributed-system-idempotency.md)
+- [分布式服务接口请求的顺序性如何保证？](https://gitee.com/fenglunjia/Java-Interview-Advanced/blob/master/docs/distributed-system/distributed-system-request-sequence.md)
+- [如何自己设计一个类似 Dubbo 的 RPC 框架？](https://gitee.com/fenglunjia/Java-Interview-Advanced/blob/master/docs/distributed-system/dubbo-rpc-design.md)[手写rpc代码下载!](https://gitee.com/link?target=https%3A%2F%2Fgithub.com%2Fshishan100%2FJava-Interview-Advanced%2Fraw%2Fmaster%2Fdocs%2Fdistributed-system%2Fcode%2Frpc-demo.zip)
+- [为什么要进行系统拆分？如何进行系统拆分？拆分后不用 Dubbo 可以吗？](https://gitee.com/fenglunjia/Java-Interview-Advanced/blob/master/docs/distributed-system/why-dubbo.md)
+
